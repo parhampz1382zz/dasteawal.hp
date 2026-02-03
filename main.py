@@ -1,5 +1,6 @@
 import asyncio
-import feedparser
+import httpx
+from bs4 import BeautifulSoup
 import google.generativeai as genai
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,55 +14,77 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 bot = Bot(token=BOT_TOKEN)
+sent_urls = set()  # خبرهای ارسال شده
+news_queue = []    # صف خبرها
 
 
-async def rewrite_news(title, summary):
-    prompt = f"""این خبر رو بازنویسی کن:
-عنوان: {title}
-خلاصه: {summary}
+async def get_news_from_site():
+    """گرفتن خبرها از صفحه اول BBC فارسی"""
+    async with httpx.AsyncClient() as client:
+        r = await client.get("https://www.bbc.com/persian", timeout=30)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        
+        news_list = []
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            title = link.get_text(strip=True)
+            
+            if '/persian/articles/' in href and len(title) > 20:
+                full_url = href if href.startswith('http') else f"https://www.bbc.com{href}"
+                if full_url not in sent_urls:
+                    news_list.append({'title': title, 'url': full_url})
+        
+        # حذف تکراری
+        seen = set()
+        unique = []
+        for n in news_list:
+            if n['url'] not in seen:
+                seen.add(n['url'])
+                unique.append(n)
+        
+        return unique[:15]  # ۱۵ خبر اول
 
-فقط متن خبر رو بنویس، کوتاه و جذاب."""
-    
+
+async def rewrite_news(title):
+    prompt = f"این عنوان خبر رو جذاب‌تر بنویس (فقط یک جمله): {title}"
     response = model.generate_content(prompt)
-    return response.text
+    return response.text.strip()
 
 
-async def check_and_post():
+async def post_one_news():
+    global news_queue
+    
     try:
-        print("🔄 در حال گرفتن RSS...")
+        # اگه صف خالیه، دوباره بگیر
+        if not news_queue:
+            print("🔄 گرفتن خبرهای جدید...")
+            news_queue = await get_news_from_site()
+            print(f"📊 {len(news_queue)} خبر پیدا شد")
         
-        feed = feedparser.parse("https://feeds.bbcpersian.com/feeds/rss/persian/iran/rss.xml")
-        
-        print(f"📊 تعداد خبر: {len(feed.entries)}")
-        
-        if feed.entries:
-            news = feed.entries[0]
-            title = news.get('title', '')
-            summary = news.get('summary', '')
+        if news_queue:
+            news = news_queue.pop(0)
+            print(f"📰 {news['title'][:40]}...")
             
-            print(f"📰 عنوان: {title}")
+            text = await rewrite_news(news['title'])
+            message = f"{text}\n\n🔗 {news['url']}"
             
-            print("🤖 در حال بازنویسی با AI...")
-            text = await rewrite_news(title, summary)
-            
-            print(f"✍️ متن AI: {text[:50]}...")
-            
-            await bot.send_message(CHANNEL_ID, text)
+            await bot.send_message(CHANNEL_ID, message)
+            sent_urls.add(news['url'])
             print("✅ ارسال شد!")
         else:
-            print("❌ هیچ خبری در RSS نیست")
+            print("⏳ خبر جدیدی نیست")
             
     except Exception as e:
-        print(f"❌ خطا: {type(e).__name__}: {e}")
+        print(f"❌ خطا: {e}")
 
 
 async def main():
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_and_post, 'interval', minutes=1)
+    scheduler.add_job(post_one_news, 'interval', minutes=1)
     scheduler.start()
     
-    print("🤖 ربات شروع شد...")
-    await check_and_post()
+    print("🤖 ربات شروع شد!")
+    await post_one_news()
     
     while True:
         await asyncio.sleep(60)
