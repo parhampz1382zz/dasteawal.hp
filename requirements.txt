@@ -1,4 +1,5 @@
 aiogram
-feedparser
-google-generativeai
 apscheduler
+google-generativeai
+httpx
+beautifulsoup4
