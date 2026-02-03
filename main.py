@@ -53,7 +53,7 @@ async def check_and_post():
     try:
         news = get_latest_news()
         
-        if news and news['id'] != last_news_id:
+        if news:  # همیشه بفرسته (فقط برای تست)
             print(f"خبر جدید: {news['title']}")
             
             processed = process_with_ai(news['title'], news['summary'])
