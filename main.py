@@ -1,3 +1,4 @@
+import os
 import asyncio
 import httpx
 from bs4 import BeautifulSoup
