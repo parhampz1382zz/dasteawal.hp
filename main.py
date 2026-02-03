@@ -13,59 +13,46 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 bot = Bot(token=BOT_TOKEN)
-last_news_id = None
 
 
-def get_latest_news():
-    """گرفتن خبر از RSS"""
-    feed = feedparser.parse("https://www.tasnimnews.com/fa/rss/feed/0/8/0")
-    
-    if feed.entries:
-        news = feed.entries[0]
-        return {
-            'id': news.get('id'),
-            'title': news.get('title'),
-            'summary': news.get('summary', '')
-        }
-    return None
+async def rewrite_news(title, summary):
+    prompt = f"""این خبر رو بازنویسی کن:
+عنوان: {title}
+خلاصه: {summary}
 
-
-def process_with_ai(title, summary):
-    prompt = f"""
-    این خبر رو بازنویسی کن برای کانال تلگرام.
-    خلاصه و جذاب بنویس. حداکثر ۲ پاراگراف.
+فقط متن خبر رو بنویس، کوتاه و جذاب."""
     
-    عنوان: {title}
-    خلاصه: {summary}
-    
-    فرمت:
-    📰 [عنوان]
-    
-    [متن]
-    """
     response = model.generate_content(prompt)
     return response.text
 
 
 async def check_and_post():
-    global last_news_id
-    
     try:
-        news = get_latest_news()
+        print("🔄 در حال گرفتن RSS...")
         
-        if news:  # همیشه بفرسته (فقط برای تست)
-            print(f"خبر جدید: {news['title']}")
+        feed = feedparser.parse("https://feeds.bbcpersian.com/feeds/rss/persian/iran/rss.xml")
+        
+        print(f"📊 تعداد خبر: {len(feed.entries)}")
+        
+        if feed.entries:
+            news = feed.entries[0]
+            title = news.get('title', '')
+            summary = news.get('summary', '')
             
-            processed = process_with_ai(news['title'], news['summary'])
-            await bot.send_message(CHANNEL_ID, processed)
+            print(f"📰 عنوان: {title}")
             
-            last_news_id = news['id']
+            print("🤖 در حال بازنویسی با AI...")
+            text = await rewrite_news(title, summary)
+            
+            print(f"✍️ متن AI: {text[:50]}...")
+            
+            await bot.send_message(CHANNEL_ID, text)
             print("✅ ارسال شد!")
         else:
-            print("خبر جدیدی نیست")
+            print("❌ هیچ خبری در RSS نیست")
             
     except Exception as e:
-        print(f"❌ خطا: {e}")
+        print(f"❌ خطا: {type(e).__name__}: {e}")
 
 
 async def main():
