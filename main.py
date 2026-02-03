@@ -1,97 +1,66 @@
 import asyncio
-import requests
-from bs4 import BeautifulSoup
+import feedparser
 import google.generativeai as genai
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ─── تنظیمات ───
 BOT_TOKEN = "8583286853:AAHl1Llj1i991t81RgyN22FuHplKJk8q61k"
-CHANNEL_ID = "@dasteawal"  # یا آیدی عددی
+CHANNEL_ID = "@dasteawal"
 GEMINI_API_KEY = "AIzaSyAzuENCpZi2GUGLLcmKVHVRxj6Tsxkdw0w"
 
-# تنظیم Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 bot = Bot(token=BOT_TOKEN)
-
-# ذخیره آخرین خبر برای جلوگیری از تکرار
-last_news_url = None
+last_news_id = None
 
 
 def get_latest_news():
-    """گرفتن آخرین خبر از ایسنا"""
-    url = "https://www.isna.ir/latest-news"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    """گرفتن خبر از RSS"""
+    feed = feedparser.parse("https://www.tasnimnews.com/fa/rss/feed/0/8/0")
     
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # پیدا کردن اولین خبر
-    news_item = soup.select_one('.items li a')
-    
-    if news_item:
-        news_url = "https://www.isna.ir" + news_item.get('href')
-        return news_url
+    if feed.entries:
+        news = feed.entries[0]
+        return {
+            'id': news.get('id'),
+            'title': news.get('title'),
+            'summary': news.get('summary', '')
+        }
     return None
 
 
-def get_news_content(url):
-    """گرفتن محتوای کامل خبر"""
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    title = soup.select_one('h1.first-title')
-    title = title.text.strip() if title else ""
-    
-    body = soup.select_one('.item-body')
-    body = body.text.strip() if body else ""
-    
-    return title, body
-
-
-def process_with_ai(title, body):
-    """پردازش خبر با Gemini"""
+def process_with_ai(title, summary):
     prompt = f"""
-    این خبر رو بازنویسی کن و خلاصه‌تر بنویس برای کانال تلگرام.
-    لحن رسمی و خبری باشه. حداکثر ۳ پاراگراف.
+    این خبر رو بازنویسی کن برای کانال تلگرام.
+    خلاصه و جذاب بنویس. حداکثر ۲ پاراگراف.
     
     عنوان: {title}
-    متن: {body}
+    خلاصه: {summary}
     
-    فرمت خروجی:
-    📰 [عنوان جذاب]
+    فرمت:
+    📰 [عنوان]
     
-    [متن خلاصه شده]
+    [متن]
     """
-    
     response = model.generate_content(prompt)
     return response.text
 
 
 async def check_and_post():
-    """چک کردن خبر جدید و ارسال"""
-    global last_news_url
+    global last_news_id
     
     try:
-        news_url = get_latest_news()
+        news = get_latest_news()
         
-        if news_url and news_url != last_news_url:
-            print(f"خبر جدید: {news_url}")
+        if news and news['id'] != last_news_id:
+            print(f"خبر جدید: {news['title']}")
             
-            title, body = get_news_content(news_url)
+            processed = process_with_ai(news['title'], news['summary'])
+            await bot.send_message(CHANNEL_ID, processed)
             
-            if title and body:
-                processed_news = process_with_ai(title, body)
-                
-                # اضافه کردن لینک منبع
-                final_text = f"{processed_news}\n\n🔗 منبع: ایسنا"
-                
-                await bot.send_message(CHANNEL_ID, final_text)
-                last_news_url = news_url
-                print("✅ خبر ارسال شد!")
+            last_news_id = news['id']
+            print("✅ ارسال شد!")
         else:
             print("خبر جدیدی نیست")
             
@@ -101,20 +70,13 @@ async def check_and_post():
 
 async def main():
     scheduler = AsyncIOScheduler()
-    
-    # هر ۵ دقیقه چک کن
     scheduler.add_job(check_and_post, 'interval', minutes=1)
     scheduler.start()
     
-    print("🤖 ربات شروع به کار کرد...")
-    
-    # اجرای اولیه
+    print("🤖 ربات شروع شد...")
     await check_and_post()
     
-    # زنده نگه داشتن
     while True:
         await asyncio.sleep(60)
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
