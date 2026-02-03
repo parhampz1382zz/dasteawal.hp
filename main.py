@@ -11,7 +11,7 @@ CHANNEL_ID = "@dasteawal"
 GEMINI_API_KEY = "AIzaSyAzuENCpZi2GUGLLcmKVHVRxj6Tsxkdw0w"
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 bot = Bot(token=BOT_TOKEN)
 sent_urls = set()  # خبرهای ارسال شده
